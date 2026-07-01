@@ -55,8 +55,29 @@ def save_cached_key(key):
 # Global cached key in memory
 NVIDIA_API_KEY = load_cached_key()
 
-# In-memory image description cache to prevent re-processing the same images in chat history
-IMAGE_CACHE = {}
+# Persistent image description cache path
+IMAGE_CACHE_FILE = os.path.join(os.path.dirname(__file__), ".image_cache.json")
+
+def load_image_cache():
+    if os.path.exists(IMAGE_CACHE_FILE):
+        try:
+            with open(IMAGE_CACHE_FILE, "r") as f:
+                cache = json.load(f)
+                print(f"[*] Loaded {len(cache)} cached image descriptions from {IMAGE_CACHE_FILE}")
+                return cache
+        except Exception as e:
+            print(f"[-] Error loading image cache: {e}")
+    return {}
+
+def save_image_cache():
+    try:
+        with open(IMAGE_CACHE_FILE, "w") as f:
+            json.dump(IMAGE_CACHE, f)
+    except Exception as e:
+        print(f"[-] Error saving image cache: {e}")
+
+# Global image cache loaded from disk
+IMAGE_CACHE = load_image_cache()
 
 def get_image_description(base64_image_data, mime_type="image/jpeg"):
     """
@@ -154,6 +175,7 @@ def get_image_description(base64_image_data, mime_type="image/jpeg"):
             if description:
                 print("[+] Vision model description retrieved successfully.")
                 IMAGE_CACHE[img_hash] = description
+                save_image_cache()
                 return description
             else:
                 print("[-] Empty response from vision model.")
