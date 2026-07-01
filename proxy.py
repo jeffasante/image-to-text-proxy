@@ -345,13 +345,19 @@ class VisionProxyHandler(http.server.BaseHTTPRequestHandler):
             self.send_header("Access-Control-Allow-Origin", "*")
             self.end_headers()
             self.wfile.write(err_content)
+        except (BrokenPipeError, ConnectionResetError) as e:
+            print(f"[-] Client disconnected prematurely (Broken Pipe / Connection Reset): {e}")
         except Exception as e:
-            self.send_response(500)
-            self.send_header("Content-Type", "application/json")
-            self.send_header("Access-Control-Allow-Origin", "*")
-            self.end_headers()
-            err_msg = json.dumps({"error": {"message": f"Proxy Error: {e}", "type": "proxy_error"}})
-            self.wfile.write(err_msg.encode("utf-8"))
+            print(f"[-] Proxy Error: {e}")
+            try:
+                self.send_response(500)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Access-Control-Allow-Origin", "*")
+                self.end_headers()
+                err_msg = json.dumps({"error": {"message": f"Proxy Error: {e}", "type": "proxy_error"}})
+                self.wfile.write(err_msg.encode("utf-8"))
+            except Exception as write_err:
+                print(f"[-] Failed to send 500 error response: {write_err}")
 
 def run_server():
     server_address = ("", PORT)
