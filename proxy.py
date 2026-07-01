@@ -9,50 +9,151 @@ import sys
 PORT = 8099
 GLM_API_URL = "https://api.z.ai/api/paas/v4/chat/completions"
 
-# Vision Model Configuration
-# By default, we support a local vision model server running a model like minicpm-v, llava, or qwen2.5-vl.
-VISION_API_URL = os.environ.get("VISION_API_URL", "http://localhost:11434/api/chat")
-VISION_MODEL = os.environ.get("VISION_MODEL", "minicpm-v")  # e.g., minicpm-v, llava, qwen2.5-vl
+# Key cache path
+KEY_CACHE_FILE = os.path.join(os.path.dirname(__file__), ".env")
+
+def load_cached_key():
+    if os.path.exists(KEY_CACHE_FILE):
+        try:
+            with open(KEY_CACHE_FILE, "r") as f:
+                for line in f:
+                    if line.strip().startswith("NVIDIA_API_KEY="):
+                        key = line.split("=", 1)[1].strip()
+                        if key.startswith(('"', "'")) and key.endswith(('"', "'")):
+                            key = key[1:-1]
+                        if key:
+                            print(f"[*] Loaded cached Nvidia API key from {KEY_CACHE_FILE}")
+                            return key
+        except Exception as e:
+            print(f"[-] Error loading cached Nvidia key from .env: {e}")
+    return None
+
+def save_cached_key(key):
+    try:
+        lines = []
+        key_found = False
+        if os.path.exists(KEY_CACHE_FILE):
+            with open(KEY_CACHE_FILE, "r") as f:
+                lines = f.readlines()
+        
+        for i, line in enumerate(lines):
+            if line.strip().startswith("NVIDIA_API_KEY="):
+                lines[i] = f"NVIDIA_API_KEY={key}\n"
+                key_found = True
+                break
+                
+        if not key_found:
+            lines.append(f"NVIDIA_API_KEY={key}\n")
+            
+        with open(KEY_CACHE_FILE, "w") as f:
+            f.writelines(lines)
+        print(f"[+] Saved Nvidia API key to {KEY_CACHE_FILE}")
+    except Exception as e:
+        print(f"[-] Error saving Nvidia key to .env: {e}")
+
+# Global cached key in memory
+NVIDIA_API_KEY = load_cached_key()
 
 def get_image_description(base64_image_data, mime_type="image/jpeg"):
     """
-    Calls the local vision model to describe the image.
+    Calls the vision model to describe the image.
+    If an Nvidia API key is cached, it uses the cloud-hosted nvidia/nemotron or gpt-oss model.
+    Otherwise, it falls back to a local vision model server (e.g. Ollama).
     """
-    print(f"[*] Calling vision model ({VISION_MODEL}) to describe image...")
-    
     # Strip headers from base64 if present (e.g. "data:image/jpeg;base64,")
+    base64_raw = base64_image_data
     if "," in base64_image_data:
-        base64_image_data = base64_image_data.split(",")[1]
+        base64_raw = base64_image_data.split(",")[1]
         
-    try:
-        # Request payload for the local vision API
+    global NVIDIA_API_KEY
+    if not NVIDIA_API_KEY:
+        NVIDIA_API_KEY = os.environ.get("NVIDIA_API_KEY")
+        
+    if NVIDIA_API_KEY:
+        # Use cloud Nvidia NIM model (nvidia/nemotron-3-nano-omni-30b-a3b-reasoning)
+        vision_url = "https://integrate.api.nvidia.com/v1/chat/completions"
+        vision_model = "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning"
+        print(f"[*] Calling Nvidia vision model ({vision_model}) via cloud API...")
+        
         payload = {
-            "model": VISION_MODEL,
+            "model": vision_model,
             "messages": [
                 {
                     "role": "user",
-                    "content": "Describe what is in this image or screenshot in detail, highlighting any UI elements, text, or code shown.",
-                    "images": [base64_image_data]
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": "Describe what is in this image or screenshot in detail, highlighting any UI elements, text, or code shown."
+                        },
+                        {
+                            "type": "image_url",
+                            "image_url": {
+                                "url": f"data:{mime_type};base64,{base64_raw}"
+                            }
+                        }
+                    ]
                 }
             ],
             "stream": False
         }
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {NVIDIA_API_KEY}"
+        }
+    else:
+        # Fall back to local vision model (e.g. Ollama)
+        vision_url = os.environ.get("VISION_API_URL", "http://localhost:11434/api/chat")
+        vision_model = os.environ.get("VISION_MODEL", "minicpm-v")
+        print(f"[*] Calling local vision model ({vision_model}) at {vision_url}...")
         
+        payload = {
+            "model": vision_model,
+            "messages": [
+                {
+                    "role": "user",
+                    "content": "Describe what is in this image or screenshot in detail, highlighting any UI elements, text, or code shown.",
+                    "images": [base64_raw]
+                }
+            ],
+            "stream": False
+        }
+        headers = {"Content-Type": "application/json"}
+
+    try:
         req = urllib.request.Request(
-            VISION_API_URL,
+            vision_url,
             data=json.dumps(payload).encode("utf-8"),
-            headers={"Content-Type": "application/json"},
+            headers=headers,
             method="POST"
         )
         
-        with urllib.request.urlopen(req, timeout=30) as response:
+        with urllib.request.urlopen(req, timeout=90) as response:
             result = json.loads(response.read().decode("utf-8"))
-            description = result.get("message", {}).get("content", "")
-            print("[+] Vision model description retrieved successfully.")
-            return description
+            if NVIDIA_API_KEY:
+                # OpenAI compatible response format
+                description = result.get("choices", [{}])[0].get("message", {}).get("content", "")
+            else:
+                # Local runner response format
+                description = result.get("message", {}).get("content", "")
+                
+            if description:
+                print("[+] Vision model description retrieved successfully.")
+                return description
+            else:
+                print("[-] Empty response from vision model.")
+                return "[Error: Empty response from vision model]"
             
     except Exception as e:
         print(f"[-] Error calling vision model: {e}")
+        # If the Nvidia API failed, clear the cached key (maybe it expired or was invalid)
+        if NVIDIA_API_KEY and "401" in str(e):
+            print("[-] Clearing invalid cached Nvidia key.")
+            NVIDIA_API_KEY = None
+            if os.path.exists(KEY_CACHE_FILE):
+                try:
+                    os.remove(KEY_CACHE_FILE)
+                except:
+                    pass
         return f"[Error generating image description: {e}]"
 
 class VisionProxyHandler(http.server.BaseHTTPRequestHandler):
@@ -139,12 +240,30 @@ class VisionProxyHandler(http.server.BaseHTTPRequestHandler):
             
         payload["messages"] = processed_messages
         
-        # 2. Forward request to Z.AI / GLM-5.2 or DeepSeek
+        # 2. Forward request dynamically
         auth_header = self.headers.get("Authorization", "")
-        
-        # Route dynamically depending on the model
         model_name = payload.get("model", "").lower()
-        if "deepseek" in model_name:
+        
+        global NVIDIA_API_KEY
+        
+        # Check if the model requested is an Nvidia NIM model (contains nvidia, gpt-oss, nemotron, minimax, kimi, qwen, etc.)
+        is_nvidia_route = False
+        for keyword in ["nvidia", "gpt-oss", "nemotron", "minimax", "gemma-4", "kimi-k", "qwen3"]:
+            if keyword in model_name:
+                is_nvidia_route = True
+                break
+                
+        if is_nvidia_route:
+            target_url = "https://integrate.api.nvidia.com/v1/chat/completions"
+            print(f"[*] Routing request to Nvidia API ({model_name})...")
+            
+            # Cache the Nvidia API key automatically when it passes through
+            if auth_header and auth_header.startswith("Bearer "):
+                key = auth_header.split(" ")[1]
+                if key != NVIDIA_API_KEY:
+                    NVIDIA_API_KEY = key
+                    save_cached_key(key)
+        elif "deepseek" in model_name:
             target_url = "https://api.deepseek.com/chat/completions"
             print(f"[*] Routing request to DeepSeek API ({model_name})...")
         else:
@@ -201,8 +320,11 @@ def run_server():
     httpd = http.server.HTTPServer(server_address, VisionProxyHandler)
     print(f"[*] Vision Proxy Server running on port {PORT}...")
     print(f"[*] Target GLM API: {GLM_API_URL}")
-    print(f"[*] Local Vision API: {VISION_API_URL} (Model: {VISION_MODEL})")
-    print("[*] To use in Zed, configure your api_url to: http://localhost:8000/v1")
+    if NVIDIA_API_KEY:
+        print(f"[*] Local Vision API: integrate.api.nvidia.com (Model: nvidia/nemotron-3-nano-omni-30b-a3b-reasoning) [Cached key loaded]")
+    else:
+        print(f"[*] Local Vision API: http://localhost:11434/api/chat (Model: minicpm-v) [Ollama fallback]")
+    print("[*] To use in Zed, configure your api_url to: http://localhost:8099/v1")
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:
