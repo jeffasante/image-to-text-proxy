@@ -101,13 +101,12 @@ Add the following config under `"language_models"` (this replaces the standard O
 ## How to Use it in Zed
 
 1. Open the Zed Assistant panel (`Cmd + R` or click the AI icon).
-2. Select your provider as **OpenAI** (since the proxy runs on an OpenAI compatible endpoint).
-3. Select your desired model:
-   - **`glm-5.2`** (routes to Z.AI)
-   - **`deepseek-v4-flash`** (routes to DeepSeek API)
-   - **`deepseek-v4-pro`** (routes to DeepSeek API)
+2. Select your provider in the dropdown:
+   - Choose **`GLM-5.2`** to use GLM-5.2 via proxy.
+   - Choose **`DeepSeek (Proxy)`** to use DeepSeek via proxy.
+3. Select your desired model (e.g. `glm-5.2` or `deepseek-v4-flash`).
 4. Use the paperclip icon or drag-and-drop to attach screenshots/images.
-5. The proxy will automatically use your local vision model to describe the images, formatting them perfectly for the target models.
+5. The proxy will automatically describe the images and format the payload correctly before sending it to the APIs.
 
 ---
 
