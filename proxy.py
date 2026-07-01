@@ -4,6 +4,7 @@ import urllib.request
 import urllib.error
 import os
 import sys
+import hashlib
 
 # Configuration
 PORT = 8099
@@ -54,12 +55,21 @@ def save_cached_key(key):
 # Global cached key in memory
 NVIDIA_API_KEY = load_cached_key()
 
+# In-memory image description cache to prevent re-processing the same images in chat history
+IMAGE_CACHE = {}
+
 def get_image_description(base64_image_data, mime_type="image/jpeg"):
     """
     Calls the vision model to describe the image.
     If an Nvidia API key is cached, it uses the cloud-hosted nvidia/nemotron or gpt-oss model.
     Otherwise, it falls back to a local vision model server (e.g. Ollama).
     """
+    # Compute hash of base64 image data to check if we already described it
+    img_hash = hashlib.md5(base64_image_data.encode('utf-8')).hexdigest()
+    if img_hash in IMAGE_CACHE:
+        print(f"[*] Found cached image description (hash: {img_hash})")
+        return IMAGE_CACHE[img_hash]
+
     # Strip headers from base64 if present (e.g. "data:image/jpeg;base64,")
     base64_raw = base64_image_data
     if "," in base64_image_data:
@@ -138,6 +148,7 @@ def get_image_description(base64_image_data, mime_type="image/jpeg"):
                 
             if description:
                 print("[+] Vision model description retrieved successfully.")
+                IMAGE_CACHE[img_hash] = description
                 return description
             else:
                 print("[-] Empty response from vision model.")

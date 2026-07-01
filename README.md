@@ -141,6 +141,13 @@ When you run the proxy server in a terminal, it prints exactly what it is doing 
   [*] Calling vision model (minicpm-v) to describe image...
   [+] Vision model description retrieved successfully.
   ```
+- **When an image is re-sent in history (Caching)**:
+  ```text
+  [*] Found cached image description (hash: 93426323a732b7d6d7959ed7e512cb10)
+  [*] Found cached image description (hash: 2670a26eb8de9044112a3d148d88abb3)
+  [*] Routing request to Z.AI GLM API (glm-5.2)...
+  ```
+  This indicates the proxy is reusing descriptions from memory instead of repeating duplicate API calls, saving latency and API cost.
 
 ### 2. In the AI Chat response
 
