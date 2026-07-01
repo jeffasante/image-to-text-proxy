@@ -64,16 +64,16 @@ def get_image_description(base64_image_data, mime_type="image/jpeg"):
     If an Nvidia API key is cached, it uses the cloud-hosted nvidia/nemotron or gpt-oss model.
     Otherwise, it falls back to a local vision model server (e.g. Ollama).
     """
-    # Compute hash of base64 image data to check if we already described it
-    img_hash = hashlib.md5(base64_image_data.encode('utf-8')).hexdigest()
-    if img_hash in IMAGE_CACHE:
-        print(f"[*] Found cached image description (hash: {img_hash})")
-        return IMAGE_CACHE[img_hash]
-
     # Strip headers from base64 if present (e.g. "data:image/jpeg;base64,")
     base64_raw = base64_image_data
     if "," in base64_image_data:
         base64_raw = base64_image_data.split(",")[1]
+        
+    # Compute hash of raw base64 image data to check if we already described it
+    img_hash = hashlib.md5(base64_raw.encode('utf-8')).hexdigest()
+    if img_hash in IMAGE_CACHE:
+        print(f"[*] Found cached image description (hash: {img_hash})")
+        return IMAGE_CACHE[img_hash]
         
     global NVIDIA_API_KEY
     if not NVIDIA_API_KEY:
