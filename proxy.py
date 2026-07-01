@@ -69,8 +69,13 @@ def get_image_description(base64_image_data, mime_type="image/jpeg"):
     if "," in base64_image_data:
         base64_raw = base64_image_data.split(",")[1]
         
+    # Clean whitespace, newlines, and backslashes from raw base64 data to normalize it
+    base64_raw = base64_raw.strip().replace("\n", "").replace("\r", "").replace(" ", "").replace("\\", "")
+    
     # Compute hash of raw base64 image data to check if we already described it
     img_hash = hashlib.md5(base64_raw.encode('utf-8')).hexdigest()
+    print(f"[*] Image hash: {img_hash} (Length: {len(base64_raw)})")
+    
     if img_hash in IMAGE_CACHE:
         print(f"[*] Found cached image description (hash: {img_hash})")
         return IMAGE_CACHE[img_hash]
