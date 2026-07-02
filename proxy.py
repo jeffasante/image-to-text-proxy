@@ -244,8 +244,8 @@ class VisionProxyHandler(http.server.BaseHTTPRequestHandler):
                 content = "\n".join(text_parts)
                 msg["content"] = content
 
-            # Handle user messages with image blocks
-            elif role == "user" and isinstance(content, list):
+            # Handle any messages (user, system, etc.) with image blocks
+            elif isinstance(content, list):
                 new_content_blocks = []
                 for block in content:
                     if not isinstance(block, dict):
