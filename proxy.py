@@ -294,6 +294,8 @@ class VisionProxyHandler(http.server.BaseHTTPRequestHandler):
         if is_nvidia_route:
             target_url = "https://integrate.api.nvidia.com/v1/chat/completions"
             print(f"[*] Routing request to Nvidia API ({model_name})...")
+            # Strip prompt_cache_key which is unsupported by Nvidia API
+            payload.pop("prompt_cache_key", None)
             
             # Cache the Nvidia API key automatically when it passes through
             if auth_header and auth_header.startswith("Bearer "):
