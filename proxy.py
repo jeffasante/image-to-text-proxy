@@ -8,7 +8,7 @@ import hashlib
 
 # Configuration
 PORT = 8099
-GLM_API_URL = "https://api.z.ai/api/paas/v4/chat/completions"
+GLM_API_URL = "https://api.z.ai/api/coding/paas/v4/chat/completions"
 
 # Key cache path
 KEY_CACHE_FILE = os.path.join(os.path.dirname(__file__), ".env")
