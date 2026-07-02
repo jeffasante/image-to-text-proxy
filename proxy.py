@@ -284,11 +284,11 @@ class VisionProxyHandler(http.server.BaseHTTPRequestHandler):
         
         global NVIDIA_API_KEY
         
-        # Check if the model requested is an Nvidia NIM model (contains nvidia, gpt-oss, nemotron, minimax, kimi, qwen, etc.)
-        is_nvidia_route = False
-        for keyword in ["nvidia", "gpt-oss", "nemotron", "minimax", "gemma-4", "kimi-k", "qwen3"]:
+        # Check if the model requested is an Nvidia NIM model (anything not GLM or DeepSeek)
+        is_nvidia_route = True
+        for keyword in ["glm-5.2", "deepseek"]:
             if keyword in model_name:
-                is_nvidia_route = True
+                is_nvidia_route = False
                 break
                 
         if is_nvidia_route:
