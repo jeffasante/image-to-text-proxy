@@ -5,10 +5,29 @@ import urllib.error
 import os
 import sys
 import hashlib
+import subprocess
 
 # Configuration
 PORT = 8099
 GLM_API_URL = "https://api.z.ai/api/coding/paas/v4/chat/completions"
+OPENCODE_ZEN_URL = "https://opencode.ai/zen/v1/chat/completions"
+
+# Known OpenCode Zen free models (as reported by `opencode models`)
+OPENCODE_MODELS = {
+    "big-pickle",
+    "mimo-v2.5-free",
+    "north-mini-code-free",
+    "nemotron-3-ultra-free",
+    "deepseek-v4-flash-free",
+    "claude-sonnet-5",
+    # also accept with prefix in case Zed sends it
+    "opencode/big-pickle",
+    "opencode/mimo-v2.5-free",
+    "opencode/north-mini-code-free",
+    "opencode/nemotron-3-ultra-free",
+    "opencode/deepseek-v4-flash-free",
+    "opencode/claude-sonnet-5",
+}
 
 # Key cache path
 KEY_CACHE_FILE = os.path.join(os.path.dirname(__file__), ".env")
@@ -27,7 +46,23 @@ def load_cached_key():
                             return key
         except Exception as e:
             print(f"[-] Error loading cached Nvidia key from .env: {e}")
+def load_opencode_key():
+    path = os.path.expanduser("~/.local/share/opencode/auth.json")
+    if os.path.exists(path):
+        try:
+            with open(path, "r") as f:
+                data = json.load(f)
+                # Try getting the standard key, then the go key fallback
+                key = data.get("opencode", {}).get("key") or data.get("opencode-go", {}).get("key")
+                if key:
+                    return key
+        except Exception as e:
+            print(f"[-] Error loading OpenCode key: {e}")
     return None
+
+OPENCODE_API_KEY = load_opencode_key()
+if OPENCODE_API_KEY:
+    print("[*] Loaded OpenCode Zen API key from auth.json")
 
 def save_cached_key(key):
     try:
@@ -284,14 +319,64 @@ class VisionProxyHandler(http.server.BaseHTTPRequestHandler):
         
         global NVIDIA_API_KEY
         
-        # Check if the model requested is an Nvidia NIM model (anything not GLM or DeepSeek)
-        is_nvidia_route = True
-        for keyword in ["glm-5.2", "deepseek"]:
-            if keyword in model_name:
-                is_nvidia_route = False
-                break
-                
-        if is_nvidia_route:
+        # Determine route
+        # Strip opencode/ prefix for model comparison
+        model_bare = model_name.split("/")[-1] if "/" in model_name else model_name
+        full_model = payload.get("model", "")
+
+        is_opencode_route = model_name in OPENCODE_MODELS or model_bare in OPENCODE_MODELS
+        is_deepseek_route = "deepseek" in model_name and not is_opencode_route
+        is_glm_route = "glm-5.2" in model_name
+        is_nvidia_route = not is_opencode_route and not is_deepseek_route and not is_glm_route
+
+        if is_opencode_route:
+            # OpenCode Zen models require curl to bypass Cloudflare bot detection
+            # Always strip provider prefix — the API only wants the bare model name
+            bare = payload.get("model", "").split("/")[-1]
+            payload["model"] = bare
+            payload.pop("prompt_cache_key", None)
+            opencode_key = OPENCODE_API_KEY or (auth_header.split(" ")[1] if auth_header.startswith("Bearer ") else "")
+            print(f"[*] Routing request to OpenCode Zen via curl ({bare})...")
+            try:
+                curl_result = subprocess.run(
+                    [
+                        "curl", "-s", "-X", "POST", OPENCODE_ZEN_URL,
+                        "-H", "Content-Type: application/json",
+                        "-H", f"Authorization: Bearer {opencode_key}",
+                        "--data-raw", json.dumps(payload),
+                        "--max-time", "120",
+                    ],
+                    capture_output=True,
+                    timeout=125
+                )
+                response_body = curl_result.stdout
+                if not response_body:
+                    response_body = json.dumps({"error": {"message": f"OpenCode empty response: {curl_result.stderr.decode()}", "type": "proxy_error"}}).encode()
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Access-Control-Allow-Origin", "*")
+                self.end_headers()
+                self.wfile.write(response_body)
+            except subprocess.TimeoutExpired:
+                self.send_response(504)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Access-Control-Allow-Origin", "*")
+                self.end_headers()
+                self.wfile.write(json.dumps({"error": {"message": "OpenCode request timed out", "type": "proxy_error"}}).encode())
+            except (BrokenPipeError, ConnectionResetError) as e:
+                print(f"[-] Client disconnected (OpenCode route): {e}")
+            except Exception as e:
+                print(f"[-] OpenCode Proxy Error: {e}")
+                try:
+                    self.send_response(500)
+                    self.send_header("Content-Type", "application/json")
+                    self.send_header("Access-Control-Allow-Origin", "*")
+                    self.end_headers()
+                    self.wfile.write(json.dumps({"error": {"message": str(e), "type": "proxy_error"}}).encode())
+                except Exception:
+                    pass
+            return
+        elif is_nvidia_route:
             target_url = "https://integrate.api.nvidia.com/v1/chat/completions"
             print(f"[*] Routing request to Nvidia API ({model_name})...")
             # Strip prompt_cache_key which is unsupported by Nvidia API
@@ -303,7 +388,7 @@ class VisionProxyHandler(http.server.BaseHTTPRequestHandler):
                 if key != NVIDIA_API_KEY:
                     NVIDIA_API_KEY = key
                     save_cached_key(key)
-        elif "deepseek" in model_name:
+        elif is_deepseek_route:
             target_url = "https://api.deepseek.com/chat/completions"
             print(f"[*] Routing request to DeepSeek API ({model_name})...")
         else:
